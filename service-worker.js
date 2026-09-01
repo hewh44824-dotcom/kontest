@@ -1,6 +1,6 @@
-const CACHE_NAME = "disaster-ai-v2";
+const CACHE_NAME = "disaster-ai-v3";
 const ASSETS = [
-  "./disaster-ai.html",
+  "./index.html",
   "./knowledge.json",
   "./manifest.json",
   "./icon-192.png",
@@ -47,16 +47,29 @@ self.addEventListener("fetch", (event) => {
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      return (
-        cached ||
-        fetch(event.request)
-          .then((response) => {
-            const clone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
-            return response;
-          })
-          .catch(() => cached)
-      );
+      if (cached) return cached;
+
+      return fetch(event.request)
+        .then((response) => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(async () => {
+          // オフラインでキャッシュにも無い場合のフォールバック。
+          // ページ遷移(URLを直接開いた/リロードした等)なら、
+          // キャッシュ済みのメインページ(disaster-ai.html)を代わりに返す。
+          if (event.request.mode === "navigate") {
+            const fallback = await caches.match("./index.html");
+            if (fallback) return fallback;
+          }
+          // それでも無ければ、undefinedを返さず明示的な503エラーを返す
+          // (respondWithにundefinedを渡すとERR_FAILEDになるため)
+          return new Response(
+            "オフラインのため、このファイルはまだキャッシュされていません。",
+            { status: 503, statusText: "Offline", headers: { "Content-Type": "text/plain; charset=utf-8" } }
+          );
+        });
     })
   );
 });

@@ -1,7 +1,7 @@
 {
   "name": "災害時AIアシスタント",
   "short_name": "災害AI",
-  "start_url": "./disaster-ai.html",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#fafafa",
   "theme_color": "#1976d2",
