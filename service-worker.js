@@ -1,10 +1,11 @@
-const CACHE_NAME = "disaster-ai-v3";
+const CACHE_NAME = "disaster-ai-v4";
 const ASSETS = [
   "./index.html",
   "./knowledge.json",
   "./manifest.json",
   "./icon-192.png",
-  "./icon-512.png"
+  "./icon-512.png",
+  "./qrcode.png"
 ];
 
 // インストール時に必要なファイルを可能な限りキャッシュ
