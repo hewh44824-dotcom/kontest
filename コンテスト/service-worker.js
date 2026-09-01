@@ -1,4 +1,4 @@
-const CACHE_NAME = "disaster-ai-v1";
+const CACHE_NAME = "disaster-ai-v2";
 const ASSETS = [
   "./disaster-ai.html",
   "./knowledge.json",
@@ -7,10 +7,19 @@ const ASSETS = [
   "./icon-512.png"
 ];
 
-// インストール時に必要なファイルを全部キャッシュ
+// インストール時に必要なファイルを可能な限りキャッシュ
+// (addAllだと1つでも失敗すると全部失敗するため、1つずつ個別に試す)
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then((cache) => {
+      return Promise.all(
+        ASSETS.map((url) =>
+          cache.add(url).catch((err) => {
+            console.warn(`キャッシュ失敗(スキップ): ${url}`, err);
+          })
+        )
+      );
+    })
   );
   self.skipWaiting();
 });
@@ -27,11 +36,11 @@ self.addEventListener("activate", (event) => {
   self.clients.claim();
 });
 
-// オフライン時はキャッシュから返す(Gemini APIなどオンライン専用の通信は素通しする)
+// オフライン時はキャッシュから返す(Claude APIなどオンライン専用の通信は素通しする)
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
 
-  // 自分のオリジン以外(Gemini APIなど)へのリクエストはキャッシュ対象外、素通し
+  // 自分のオリジン以外(Claude APIなど)へのリクエストはキャッシュ対象外、素通し
   if (url.origin !== self.location.origin) {
     return;
   }
