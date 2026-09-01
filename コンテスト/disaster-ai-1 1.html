@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>災害時AIアシスタント</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1976d2">
+<style>
+  body { font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 16px; background: #fafafa; }
+  h2 { font-size: 18px; }
+  #status { padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; font-size: 13px; }
+  .online { background: #e3f2fd; color: #0d47a1; }
+  .offline { background: #fff3e0; color: #e65100; }
+  #apikey-box { margin-bottom: 12px; font-size: 12px; }
+  #apikey-box input { width: 100%; padding: 6px; box-sizing: border-box; margin-top: 4px; }
+  #log { border: 1px solid #ddd; border-radius: 8px; padding: 12px; min-height: 240px; margin-bottom: 12px; background: white; }
+  .msg { margin-bottom: 10px; padding: 8px 10px; border-radius: 8px; line-height: 1.5; }
+  .user { background: #f0f0f0; text-align: right; }
+  .bot { background: #e8f5e9; white-space: pre-wrap; }
+  .bot-title { font-weight: bold; margin-bottom: 4px; }
+  .tag { font-size: 11px; color: #888; margin-top: 4px; }
+  form { display: flex; gap: 8px; }
+  input[type=text] { flex: 1; padding: 10px; border: 1px solid #ccc; border-radius: 6px; }
+  button { padding: 10px 16px; border: none; border-radius: 6px; background: #1976d2; color: white; }
+  button:disabled { background: #ccc; }
+</style>
+</head>
+<body>
+  <h2>🆘 災害時AIアシスタント</h2>
+  <div id="status" class="offline">判定中...</div>
+
+  <details id="apikey-box">
+    <summary>Gemini APIキー設定(オンラインモード用・任意)</summary>
+    <input id="apikey" type="text" placeholder="Gemini APIキーを入力(保存されません、このセッションのみ有効)">
+  </details>
+
+  <div id="log"></div>
+  <form id="form">
+    <input id="input" type="text" placeholder="例: 出血が止まらない" autocomplete="off">
+    <button id="send" type="submit">送信</button>
+  </form>
+
+<script>
+  const KB_URL = "knowledge.json";
+  const logEl = document.getElementById("log");
+  const statusEl = document.getElementById("status");
+  const formEl = document.getElementById("form");
+  const inputEl = document.getElementById("input");
+  const apikeyEl = document.getElementById("apikey");
+
+  let knowledgeBase = [];
+
+  function addMsg(role, html) {
+    const div = document.createElement("div");
+    div.className = "msg " + role;
+    div.innerHTML = html;
+    logEl.appendChild(div);
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+
+  // --- オフライン知識ベース検索 ---
+  function searchKnowledge(query, kb) {
+    const q = query.trim();
+    if (!q) return null;
+    let best = null, bestScore = 0;
+    for (const entry of kb) {
+      let score = 0;
+      for (const kw of entry.keywords) {
+        if (q.includes(kw)) score += kw.length;
+      }
+      if (entry.title && q.includes(entry.title)) score += 5;
+      if (score > bestScore) { bestScore = score; best = entry; }
+    }
+    return bestScore > 0 ? best : null;
+  }
+
+  // --- オンライン時: Gemini API呼び出し ---
+  async function askGemini(query, apiKey) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`;
+    const systemPrompt = "あなたは災害時の応急対応をサポートするAIアシスタントです。簡潔かつ実用的に、日本語で答えてください。医療行為が必要な重大なケースでは119番等への通報を促してください。";
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": apiKey
+      },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: query }] }],
+        system_instruction: { parts: [{ text: systemPrompt }] }
+      })
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`API エラー(${res.status}): ${errText.slice(0, 200)}`);
+    }
+    const data = await res.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || "(応答が空でした)";
+  }
+
+  function updateStatus() {
+    if (navigator.onLine) {
+      statusEl.className = "online";
+      statusEl.textContent = "🟢 オンライン — Gemini APIキーがあれば生成AIモード、無ければ知識ベース検索";
+    } else {
+      statusEl.className = "offline";
+      statusEl.textContent = "🟠 オフライン — 応急知識ベース検索モード";
+    }
+  }
+  window.addEventListener("online", updateStatus);
+  window.addEventListener("offline", updateStatus);
+
+  async function loadKnowledgeBase() {
+    try {
+      const res = await fetch(KB_URL);
+      knowledgeBase = await res.json();
+    } catch (e) {
+      addMsg("bot", "⚠️ 知識ベースの読み込みに失敗しました: " + e.message);
+    }
+  }
+
+  formEl.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const query = inputEl.value.trim();
+    if (!query) return;
+    addMsg("user", query);
+    inputEl.value = "";
+
+    const apiKey = apikeyEl.value.trim();
+
+    if (navigator.onLine && apiKey) {
+      addMsg("bot", "考え中...");
+      const thinkingMsg = logEl.lastChild;
+      try {
+        const answer = await askGemini(query, apiKey);
+        thinkingMsg.innerHTML = escapeHtml(answer) + '<div class="tag">🌐 生成AI(Gemini)より</div>';
+      } catch (err) {
+        thinkingMsg.innerHTML = "⚠️ " + escapeHtml(err.message) + "<br>知識ベース検索に切り替えます。";
+        fallbackToKnowledge(query);
+      }
+    } else {
+      fallbackToKnowledge(query);
+    }
+  });
+
+  function fallbackToKnowledge(query) {
+    const result = searchKnowledge(query, knowledgeBase);
+    if (result) {
+      addMsg("bot", `<div class="bot-title">${escapeHtml(result.title)}</div>${escapeHtml(result.answer)}<div class="tag">📚 応急知識ベースより</div>`);
+    } else {
+      addMsg("bot", "該当する情報が見つかりませんでした。命に関わる場合は119番/110番へ連絡してください。");
+    }
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // --- Service Worker登録(PWA化) ---
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("service-worker.js").catch((e) => {
+        console.warn("Service Worker登録失敗:", e);
+      });
+    });
+  }
+
+  updateStatus();
+  loadKnowledgeBase();
+</script>
+</body>
+</html>
