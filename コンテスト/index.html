@@ -31,8 +31,8 @@
   <div id="status" class="offline">判定中...</div>
 
   <details id="apikey-box">
-    <summary>Gemini APIキー設定(オンラインモード用・任意)</summary>
-    <input id="apikey" type="text" placeholder="Gemini APIキーを入力(保存されません、このセッションのみ有効)">
+    <summary>Claude APIキー設定(オンラインモード用・任意)</summary>
+    <input id="apikey" type="text" placeholder="Claude APIキーを入力(sk-ant-... 保存されません、このセッションのみ有効)">
   </details>
 
   <div id="log"></div>
@@ -75,19 +75,25 @@
     return bestScore > 0 ? best : null;
   }
 
-  // --- オンライン時: Gemini API呼び出し ---
-  async function askGemini(query, apiKey) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent`;
+  // --- オンライン時: Claude API呼び出し ---
+  async function askClaude(query, apiKey) {
+    const url = "https://api.anthropic.com/v1/messages";
     const systemPrompt = "あなたは災害時の応急対応をサポートするAIアシスタントです。簡潔かつ実用的に、日本語で答えてください。医療行為が必要な重大なケースでは119番等への通報を促してください。";
     const res = await fetch(url, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-goog-api-key": apiKey
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        // ブラウザから直接APIキーを使って呼び出すために必要なヘッダー。
+        // 本番運用ではAPIキーをサーバー側で管理する構成を推奨します。
+        "anthropic-dangerous-direct-browser-access": "true"
       },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: query }] }],
-        system_instruction: { parts: [{ text: systemPrompt }] }
+        model: "claude-sonnet-4-6",
+        max_tokens: 1000,
+        system: systemPrompt,
+        messages: [{ role: "user", content: query }]
       })
     });
     if (!res.ok) {
@@ -95,13 +101,13 @@
       throw new Error(`API エラー(${res.status}): ${errText.slice(0, 200)}`);
     }
     const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || "(応答が空でした)";
+    return data.content?.[0]?.text || "(応答が空でした)";
   }
 
   function updateStatus() {
     if (navigator.onLine) {
       statusEl.className = "online";
-      statusEl.textContent = "🟢 オンライン — Gemini APIキーがあれば生成AIモード、無ければ知識ベース検索";
+      statusEl.textContent = "🟢 オンライン — Claude APIキーがあれば生成AIモード、無ければ知識ベース検索";
     } else {
       statusEl.className = "offline";
       statusEl.textContent = "🟠 オフライン — 応急知識ベース検索モード";
@@ -132,8 +138,8 @@
       addMsg("bot", "考え中...");
       const thinkingMsg = logEl.lastChild;
       try {
-        const answer = await askGemini(query, apiKey);
-        thinkingMsg.innerHTML = escapeHtml(answer) + '<div class="tag">🌐 生成AI(Gemini)より</div>';
+        const answer = await askClaude(query, apiKey);
+        thinkingMsg.innerHTML = escapeHtml(answer) + '<div class="tag">🌐 生成AI(Claude)より</div>';
       } catch (err) {
         thinkingMsg.innerHTML = "⚠️ " + escapeHtml(err.message) + "<br>知識ベース検索に切り替えます。";
         fallbackToKnowledge(query);
