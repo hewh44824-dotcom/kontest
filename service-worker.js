@@ -1,4 +1,4 @@
-const CACHE_NAME = "disaster-ai-v7";
+const CACHE_NAME = "disaster-ai-v8";
 const TILE_CACHE_NAME = "disaster-ai-map-tiles-v1";
 const ASSETS = [
   "./index.html",
