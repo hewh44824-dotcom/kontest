@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>避難場所一覧</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#1976d2">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  body { font-family: sans-serif; max-width: 480px; margin: 0 auto; padding: 16px; background: #fafafa; }
+  h2 { font-size: 18px; }
+  a.back { display: inline-block; margin-bottom: 12px; color: #1976d2; text-decoration: none; font-size: 14px; }
+  #status { padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; font-size: 13px; }
+  .online { background: #e3f2fd; color: #0d47a1; }
+  .offline { background: #fff3e0; color: #e65100; }
+  #city-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .city-btn { padding: 6px 12px; border-radius: 16px; border: 1px solid #1976d2; background: white; color: #1976d2; font-size: 13px; cursor: pointer; }
+  .city-btn.active { background: #1976d2; color: white; }
+  #map { height: 280px; border-radius: 8px; margin-bottom: 12px; background: #e0e0e0; }
+  #map-offline-note { display: none; text-align: center; font-size: 12px; color: #888; padding: 8px; margin-bottom: 12px; }
+  #list { display: flex; flex-direction: column; gap: 8px; }
+  .shelter-card { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; }
+  .shelter-name { font-weight: bold; margin-bottom: 4px; }
+  .shelter-address { font-size: 13px; color: #555; }
+  .shelter-address a { color: #1976d2; text-decoration: none; font-size: 12px; }
+  #empty { text-align: center; color: #888; padding: 24px 0; font-size: 14px; }
+</style>
+</head>
+<body>
+  <a class="back" href="index.html">← アシスタントに戻る</a>
+  <h2>🏫 避難場所一覧(愛知県)</h2>
+  <div id="status" class="offline">判定中...</div>
+
+  <div id="city-tabs"></div>
+  <div id="map"></div>
+  <p id="map-offline-note">🗺️ 地図の表示にはインターネット接続が必要です(オフライン時は下の一覧のみ利用できます)</p>
+  <div id="list"></div>
+  <div id="empty" style="display:none;">該当する避難場所が見つかりませんでした。</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const statusEl = document.getElementById("status");
+  const tabsEl = document.getElementById("city-tabs");
+  const listEl = document.getElementById("list");
+  const emptyEl = document.getElementById("empty");
+
+  let shelters = [];
+  let currentCity = "すべて";
+  let map = null;
+  let markers = [];
+
+  function updateStatus() {
+    if (navigator.onLine) {
+      statusEl.className = "online";
+      statusEl.textContent = "🟢 オンライン";
+      document.getElementById("map").style.display = "block";
+      document.getElementById("map-offline-note").style.display = "none";
+      if (map) setTimeout(() => map.invalidateSize(), 100);
+    } else {
+      statusEl.className = "offline";
+      statusEl.textContent = "🟠 オフライン — キャッシュされたデータを表示中";
+      document.getElementById("map").style.display = "none";
+      document.getElementById("map-offline-note").style.display = "block";
+    }
+  }
+  window.addEventListener("online", updateStatus);
+  window.addEventListener("offline", updateStatus);
+
+  function initMap() {
+    if (typeof L === "undefined") return; // Leafletが読み込めない(オフライン等)場合は地図なしで続行
+    map = L.map("map").setView([35.28, 136.85], 11); // 愛知県北部あたりを中心に
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+      maxZoom: 19
+    }).addTo(map);
+  }
+
+  function renderMarkers(filtered) {
+    if (!map) return;
+    markers.forEach((m) => map.removeLayer(m));
+    markers = [];
+    for (const s of filtered) {
+      const marker = L.marker([s.lat, s.lng]).addTo(map);
+      marker.bindPopup(`<strong>${escapeHtml(s.name)}</strong><br>${escapeHtml(s.address)}`);
+      markers.push(marker);
+    }
+    if (filtered.length) {
+      const bounds = L.latLngBounds(filtered.map((s) => [s.lat, s.lng]));
+      map.fitBounds(bounds, { padding: [24, 24], maxZoom: 15 });
+    }
+  }
+
+  function render() {
+    const filtered = currentCity === "すべて"
+      ? shelters
+      : shelters.filter((s) => s.city === currentCity);
+
+    listEl.innerHTML = "";
+    emptyEl.style.display = filtered.length ? "none" : "block";
+
+    for (const s of filtered) {
+      const card = document.createElement("div");
+      card.className = "shelter-card";
+      const mapUrl = "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(s.address);
+      card.innerHTML = `
+        <div class="shelter-name">${escapeHtml(s.name)}</div>
+        <div class="shelter-address">${escapeHtml(s.address)}<br>
+          <a href="${mapUrl}" target="_blank" rel="noopener">📍地図で見る(オンライン時のみ)</a>
+        </div>
+      `;
+      listEl.appendChild(card);
+    }
+
+    renderMarkers(filtered);
+  }
+
+  function renderTabs() {
+    const cities = ["すべて", ...new Set(shelters.map((s) => s.city))];
+    tabsEl.innerHTML = "";
+    for (const city of cities) {
+      const btn = document.createElement("button");
+      btn.className = "city-btn" + (city === currentCity ? " active" : "");
+      btn.textContent = city;
+      btn.addEventListener("click", () => {
+        currentCity = city;
+        renderTabs();
+        render();
+      });
+      tabsEl.appendChild(btn);
+    }
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  async function loadShelters() {
+    try {
+      const res = await fetch("shelters.json");
+      shelters = await res.json();
+      renderTabs();
+      render();
+    } catch (e) {
+      emptyEl.style.display = "block";
+      emptyEl.textContent = "避難場所データの読み込みに失敗しました: " + e.message;
+    }
+  }
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("service-worker.js").catch((e) => {
+        console.warn("Service Worker登録失敗:", e);
+      });
+    });
+  }
+
+  updateStatus();
+  initMap();
+  loadShelters();
+</script>
+</body>
+</html>
