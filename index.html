@@ -43,10 +43,12 @@
     <button id="send" type="submit">送信</button>
   </form>
 
-  <div id="qr-box" style="margin-top: 20px; text-align: center; font-size: 13px; color: #555;">
-    <p style="margin-bottom: 6px;">📱 このページをスマホで開く</p>
-    <img src="qrcode.png" alt="このサイトへのQRコード" width="140" height="140" style="border: 1px solid #ddd; border-radius: 8px; padding: 6px; background: white;">
-  </div>
+  <details id="qr-box" style="margin-top: 20px; font-size: 13px; color: #555;">
+    <summary style="cursor: pointer;">📱 このページをスマホで開く(QRコードを表示)</summary>
+    <div style="text-align: center; margin-top: 10px;">
+      <img src="qrcode.png" alt="このサイトへのQRコード" width="140" height="140" style="border: 1px solid #ddd; border-radius: 8px; padding: 6px; background: white;">
+    </div>
+  </details>
 
 <script>
   const KB_URL = "knowledge.json";
