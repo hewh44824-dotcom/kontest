@@ -19,8 +19,11 @@
   #city-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
   .city-btn { padding: 6px 12px; border-radius: 16px; border: 1px solid #1976d2; background: white; color: #1976d2; font-size: 13px; cursor: pointer; }
   .city-btn.active { background: #1976d2; color: white; }
-  #map { height: 280px; border-radius: 8px; margin-bottom: 12px; background: #e0e0e0; }
+  #map { height: 280px; border-radius: 8px; margin-bottom: 8px; background: #e0e0e0; }
+  #locate-btn { display: block; width: 100%; padding: 8px; margin-bottom: 12px; border: 1px solid #1976d2; background: white; color: #1976d2; border-radius: 6px; font-size: 13px; cursor: pointer; }
+  #locate-btn:active { background: #e3f2fd; }
   #map-offline-note { display: none; text-align: center; font-size: 12px; color: #888; padding: 8px; margin-bottom: 12px; }
+  .shelter-distance { font-size: 12px; color: #1976d2; margin-top: 2px; }
   #list { display: flex; flex-direction: column; gap: 8px; }
   .shelter-card { background: white; border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; }
   .shelter-name { font-weight: bold; margin-bottom: 4px; }
@@ -36,7 +39,8 @@
 
   <div id="city-tabs"></div>
   <div id="map"></div>
-  <p id="map-offline-note">🗺️ 地図の表示にはインターネット接続が必要です(オフライン時は下の一覧のみ利用できます)</p>
+  <button id="locate-btn">📍 現在地を表示して近い順に並べる</button>
+  <p id="map-offline-note">🗺️ 地図タイルは一度オンラインで見た範囲のみオフラインで表示できます</p>
   <div id="list"></div>
   <div id="empty" style="display:none;">該当する避難場所が見つかりませんでした。</div>
 
@@ -51,20 +55,20 @@
   let currentCity = "すべて";
   let map = null;
   let markers = [];
+  let myLocation = null; // { lat, lng }
+  let myLocationMarker = null;
 
   function updateStatus() {
     if (navigator.onLine) {
       statusEl.className = "online";
       statusEl.textContent = "🟢 オンライン";
-      document.getElementById("map").style.display = "block";
       document.getElementById("map-offline-note").style.display = "none";
-      if (map) setTimeout(() => map.invalidateSize(), 100);
     } else {
       statusEl.className = "offline";
       statusEl.textContent = "🟠 オフライン — キャッシュされたデータを表示中";
-      document.getElementById("map").style.display = "none";
       document.getElementById("map-offline-note").style.display = "block";
     }
+    if (map) setTimeout(() => map.invalidateSize(), 100);
   }
   window.addEventListener("online", updateStatus);
   window.addEventListener("offline", updateStatus);
@@ -78,6 +82,17 @@
     }).addTo(map);
   }
 
+  // 2地点間の距離(km)をハーバサイン公式で計算
+  function distanceKm(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
   function renderMarkers(filtered) {
     if (!map) return;
     markers.forEach((m) => map.removeLayer(m));
@@ -87,16 +102,33 @@
       marker.bindPopup(`<strong>${escapeHtml(s.name)}</strong><br>${escapeHtml(s.address)}`);
       markers.push(marker);
     }
-    if (filtered.length) {
-      const bounds = L.latLngBounds(filtered.map((s) => [s.lat, s.lng]));
+
+    if (myLocation) {
+      if (myLocationMarker) map.removeLayer(myLocationMarker);
+      myLocationMarker = L.circleMarker([myLocation.lat, myLocation.lng], {
+        radius: 8, color: "#d32f2f", fillColor: "#ff5252", fillOpacity: 0.9, weight: 2
+      }).addTo(map);
+      myLocationMarker.bindPopup("📍 現在地");
+    }
+
+    const boundsPoints = filtered.map((s) => [s.lat, s.lng]);
+    if (myLocation) boundsPoints.push([myLocation.lat, myLocation.lng]);
+    if (boundsPoints.length) {
+      const bounds = L.latLngBounds(boundsPoints);
       map.fitBounds(bounds, { padding: [24, 24], maxZoom: 15 });
     }
   }
 
   function render() {
-    const filtered = currentCity === "すべて"
+    let filtered = currentCity === "すべて"
       ? shelters
       : shelters.filter((s) => s.city === currentCity);
+
+    if (myLocation) {
+      filtered = filtered
+        .map((s) => ({ ...s, _dist: distanceKm(myLocation.lat, myLocation.lng, s.lat, s.lng) }))
+        .sort((a, b) => a._dist - b._dist);
+    }
 
     listEl.innerHTML = "";
     emptyEl.style.display = filtered.length ? "none" : "block";
@@ -105,11 +137,15 @@
       const card = document.createElement("div");
       card.className = "shelter-card";
       const mapUrl = "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(s.address);
+      const distHtml = s._dist !== undefined
+        ? `<div class="shelter-distance">現在地から約${s._dist.toFixed(1)}km</div>`
+        : "";
       card.innerHTML = `
         <div class="shelter-name">${escapeHtml(s.name)}</div>
         <div class="shelter-address">${escapeHtml(s.address)}<br>
           <a href="${mapUrl}" target="_blank" rel="noopener">📍地図で見る(オンライン時のみ)</a>
         </div>
+        ${distHtml}
       `;
       listEl.appendChild(card);
     }
@@ -138,6 +174,30 @@
     div.textContent = str;
     return div.innerHTML;
   }
+
+  const locateBtn = document.getElementById("locate-btn");
+  locateBtn.addEventListener("click", () => {
+    if (!("geolocation" in navigator)) {
+      alert("この端末・ブラウザでは位置情報を取得できません。");
+      return;
+    }
+    locateBtn.textContent = "📍 現在地を取得中...";
+    locateBtn.disabled = true;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        myLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        locateBtn.textContent = "📍 現在地を更新して近い順に並べる";
+        locateBtn.disabled = false;
+        render();
+      },
+      (err) => {
+        alert("現在地を取得できませんでした(" + err.message + ")。位置情報の利用を許可してください。");
+        locateBtn.textContent = "📍 現在地を表示して近い順に並べる";
+        locateBtn.disabled = false;
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  });
 
   async function loadShelters() {
     try {
