@@ -131,7 +131,7 @@
       const res = await fetch(KB_URL);
       knowledgeBase = await res.json();
     } catch (e) {
-      addMsg("bot", "⚠️ 知識ベースの読み込みに失敗しました: " + e.message);
+      addMsg("bot", "⚠️ 知識ベースの読み込みに失敗しました: " + escapeHtml(e.message));
     }
   }
 
@@ -139,7 +139,7 @@
     e.preventDefault();
     const query = inputEl.value.trim();
     if (!query) return;
-    addMsg("user", query);
+    addMsg("user", escapeHtml(query));
     inputEl.value = "";
 
     const apiKey = apikeyEl.value.trim();
